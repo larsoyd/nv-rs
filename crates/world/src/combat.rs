@@ -1728,9 +1728,8 @@ pub fn worn_damage_threshold(order: &LoadOrder, state: &GameState, who: FormId) 
         .unwrap_or(0.0) as f32
 }
 
-/// The weapon someone has in hand: the one equipped, else (for people and
-/// creatures with none equipped) the first weapon they carry. Not one
-/// they've dropped (`world::body_parts::hurt_part`).
+/// The weapon someone has in hand: the one equipped, else for anyone but the player the best
+/// one they carry, never one they dropped.
 pub fn weapon_in_hand(order: &LoadOrder, state: &GameState, who: FormId) -> Option<Weapon> {
     let dropped = |i: FormId| state.dropped.contains(&(who, i));
     let equipped = state
@@ -1746,16 +1745,11 @@ pub fn weapon_in_hand(order: &LoadOrder, state: &GameState, who: FormId) -> Opti
     if equipped.is_none() && state.npc_combat.unarmed.contains(&who) {
         return None;
     }
-    // Else the player's first; someone else's best (`world::actor::
-    // best_weapon`), from what they carry now or, untouched, what their
-    // record gives them (as they're drawn).
+    // the player draws fists with nothing equipped, only others pick one at 008a6840
+    // from what they carry now or, untouched, what their record gives them
     let id = equipped.or_else(|| {
         if who == PLAYER_REF {
-            state
-                .inventory(order, who)
-                .into_iter()
-                .map(|(i, _)| i)
-                .find(|&i| order.get(i).is_some_and(|r| r.entry.header.kind == WEAP))
+            None
         } else if state.stocked.contains(&who) || disarmed {
             let items: Vec<(FormId, i32)> = state
                 .inventory(order, who)

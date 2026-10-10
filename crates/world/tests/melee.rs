@@ -260,3 +260,18 @@ fn a_cross_hurts_limbs_more_and_an_uppercut_disarms() {
     assert!(!uppercut.crippled && uppercut.staggered);
     assert_eq!(uppercut.dropped, Some(FormId(SUPER_SLEDGE)));
 }
+
+#[test]
+fn a_player_with_nothing_equipped_has_fists_even_carrying_a_weapon() {
+    let (_data, order) = order("player-carried-weapon");
+    let mut state = GameState::new(&order);
+    state.items.insert((PLAYER_REF, FormId(MACHETE)), 1);
+    assert!(combat::weapon_in_hand(&order, &state, PLAYER_REF).is_none());
+    state
+        .equipped
+        .entry(PLAYER_REF)
+        .or_default()
+        .push(FormId(MACHETE));
+    let held = combat::weapon_in_hand(&order, &state, PLAYER_REF).map(|w| w.form_id);
+    assert_eq!(held, Some(FormId(MACHETE)));
+}

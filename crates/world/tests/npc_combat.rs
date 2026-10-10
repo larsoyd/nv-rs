@@ -287,3 +287,15 @@ fn set_unconscious_ends_their_fight() {
     );
     assert!(!state.unconscious.contains(&raider));
 }
+
+#[test]
+fn someone_with_nothing_equipped_draws_a_weapon_they_carry() {
+    let (_data, order) = order("npcc-carried");
+    let state = armed(&order, &[]);
+    let guard = FormId(GUARD_REF);
+    assert!(state.equipped.get(&guard).is_none_or(|e| e.is_empty()));
+    assert_eq!(
+        combat::weapon_in_hand(&order, &state, guard).map(|w| w.form_id),
+        Some(FormId(PISTOL))
+    );
+}
