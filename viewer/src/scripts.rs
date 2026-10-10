@@ -650,6 +650,27 @@ fn record_name(order: &esm::LoadOrder, id: FormId) -> String {
 /// Where F5 saves and F9 loads (in the folder the viewer runs in).
 pub(crate) const QUICKSAVE: &str = "nv-rs-quicksave.txt";
 
+/// --load: a viewer save to load once the player is placed.
+#[derive(Resource, Default)]
+pub struct StartLoad(pub Option<String>);
+
+/// The save to load this frame: the start menu's, else the quick save
+/// (F9 or a death), else the start save once the player is placed.
+fn load_source(
+    asked: Option<&crate::game_menus::start::SaveFile>,
+    quick: bool,
+    ready: bool,
+    start: &mut StartLoad,
+) -> Option<String> {
+    use crate::game_menus::start::SaveFile;
+    match asked {
+        Some(SaveFile::Load(p)) => Some(p.to_string_lossy().to_string()),
+        _ if quick => Some(QUICKSAVE.to_string()),
+        _ if ready => start.0.take(),
+        _ => None,
+    }
+}
+
 /// A load of the most recent save asked for by the game itself (the
 /// player's death, `world::player_death`), done as F9 does it.
 #[derive(Resource, Default)]
@@ -753,10 +774,11 @@ pub fn save_and_load(
     mut player_idle: ResMut<crate::player_idle::PlayerIdle>,
     mut cell_scripts: ResMut<CellScripts>,
     mut seats: ResMut<crate::sitting::Seats>,
-    (mut start_pitch, mut request, mut menu_saves): (
+    (mut start_pitch, mut request, mut menu_saves, mut start_load): (
         ResMut<crate::StartPitch>,
         ResMut<LoadRequest>,
         ResMut<crate::game_menus::start::SaveFiles>,
+        ResMut<StartLoad>,
     ),
 ) {
     let now = time.elapsed_secs();
@@ -774,11 +796,12 @@ pub fn save_and_load(
         _ if keys.just_pressed(KeyCode::F5) => Some(QUICKSAVE.to_string()),
         _ => None,
     };
-    let load_from = match &asked {
-        Some(SaveFile::Load(p)) => Some(p.to_string_lossy().to_string()),
-        _ if keys.just_pressed(KeyCode::F9) || requested => Some(QUICKSAVE.to_string()),
-        _ => None,
-    };
+    let load_from = load_source(
+        asked.as_ref(),
+        keys.just_pressed(KeyCode::F9) || requested,
+        player.ready,
+        &mut start_load,
+    );
     if let Some(save_to) = save_to {
         let place = cameras.single().ok().and_then(|(t, input)| {
             let eye = game_point(t.translation);
@@ -1934,6 +1957,27 @@ mod tests {
 
     #[derive(Resource)]
     struct TestLoadResult(Result<bool, String>);
+
+    #[test]
+    fn the_start_save_waits_for_the_player_and_loads_once() {
+        use crate::game_menus::start::SaveFile;
+        let mut start = StartLoad(Some("start.txt".into()));
+        assert_eq!(load_source(None, false, false, &mut start), None);
+        let menu = SaveFile::Load("menu.txt".into());
+        assert_eq!(
+            load_source(Some(&menu), false, true, &mut start).as_deref(),
+            Some("menu.txt")
+        );
+        assert_eq!(
+            load_source(None, true, true, &mut start).as_deref(),
+            Some(QUICKSAVE)
+        );
+        assert_eq!(
+            load_source(None, false, true, &mut start).as_deref(),
+            Some("start.txt")
+        );
+        assert_eq!(load_source(None, false, true, &mut start), None);
+    }
 
     #[test]
     fn later_lines_run_once_when_due_in_time_order() {

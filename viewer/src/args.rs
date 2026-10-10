@@ -54,6 +54,10 @@ OPTIONS:
                             quests, globals, inventory, the player's place
                             (the CELL can then be left out); prints what
                             it took (docs/FOS_SAVES.md)
+    --load FILE             load one of the viewer's own saves (F5 writes
+                            nv-rs-quicksave.txt) once placed, as F9 does;
+                            starts in Doc Mitchell's house unless a CELL
+                            is given
     --character FILE        start as a ready-made test character: a file
                             of the game's script lines (editor IDs) run
                             on the new game before its first frame, plus
@@ -245,6 +249,8 @@ pub struct Args {
     pub character: Option<PathBuf>,
     /// `--load-fos`: an original save to start from (`world::fos_import`).
     pub load_fos: Option<PathBuf>,
+    /// --load: a viewer save to load once placed, as F9 loads one.
+    pub load: Option<PathBuf>,
     /// A weapon to start with, equipped.
     pub weapon: Option<String>,
     /// Script lines to run once loaded, as console commands.
@@ -351,6 +357,7 @@ pub fn parse(args: &[String]) -> Result<Option<Args>, String> {
     let mut weapon = None;
     let mut character = None;
     let mut load_fos = None;
+    let mut load = None;
     let mut run = Vec::new();
     let mut run_at = Vec::new();
     let mut say = Vec::new();
@@ -430,6 +437,7 @@ pub fn parse(args: &[String]) -> Result<Option<Args>, String> {
             "--weapon" => weapon = Some(value("--weapon")?),
             "--character" => character = Some(value("--character")?.into()),
             "--load-fos" => load_fos = Some(value("--load-fos")?.into()),
+            "--load" => load = Some(value("--load")?.into()),
             "--run" => run.push(value("--run")?),
             "--run-at" => {
                 let v = value("--run-at")?;
@@ -565,6 +573,17 @@ pub fn parse(args: &[String]) -> Result<Option<Args>, String> {
         }
     }
     let movies = movies.unwrap_or(screenshot.is_none());
+    // A viewer save loads once the player is placed, from any cell.
+    if load.is_some() {
+        if new_game || stage.is_some() || load_fos.is_some() {
+            return Err(
+                "--load starts from the save; leave out --new-game, --stage and --load-fos".into(),
+            );
+        }
+        if positional.len() == 1 {
+            positional.push(NEW_GAME_CELL.to_string());
+        }
+    }
     // An original save says where to start.
     if load_fos.is_some() {
         if new_game || stage.is_some() {
@@ -590,6 +609,7 @@ pub fn parse(args: &[String]) -> Result<Option<Args>, String> {
             stage,
             character,
             load_fos,
+            load,
             weapon,
             run,
             run_at,
@@ -751,6 +771,26 @@ mod tests {
         assert!(parse(&strings(&["D", "--load-fos", "a.fos", "--new-game"])).is_err());
         assert!(parse(&strings(&["D", "--load-fos", "a.fos", "--stage", "Q", "1"])).is_err());
         assert!(parse(&strings(&["D", "--load-fos"])).is_err());
+    }
+
+    #[test]
+    fn a_viewer_save_is_loaded_from_doc_mitchells_house_unless_a_cell_is_given() {
+        let args = parse(&strings(&["Data", "--load", "q.txt"]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(args.load, Some(PathBuf::from("q.txt")));
+        assert_eq!(args.cell, "GSDocMitchellHouse");
+        let args = parse(&strings(&["Data", "Goodsprings", "--load", "q.txt"]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(args.cell, "Goodsprings");
+        assert!(parse(&strings(&["D", "--load", "q.txt", "--new-game"])).is_err());
+        assert!(parse(&strings(&["D", "--load", "q.txt", "--stage", "Q", "1"])).is_err());
+        assert!(parse(&strings(&["D", "--load", "q.txt", "--load-fos", "a.fos"])).is_err());
+        assert_eq!(
+            parse(&strings(&["D", "--load"])).err().as_deref(),
+            Some("--load needs a value")
+        );
     }
 
     #[test]

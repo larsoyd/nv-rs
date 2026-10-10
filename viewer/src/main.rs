@@ -167,6 +167,10 @@ fn main() {
             std::process::exit(1);
         }
     };
+    if let Some(path) = args.load.as_ref().filter(|p| !p.is_file()) {
+        eprintln!("error: --load: no save at {}", path.display());
+        std::process::exit(1);
+    }
     // `--load-fos`: an original save gives the state and the place.
     let mut from_save = match args.load_fos.as_deref().map(|p| fos_start::open(&game, p)) {
         Some(Ok(start)) => Some(start),
@@ -415,6 +419,9 @@ fn main() {
         .add_plugins(frame_work::FrameWorkPlugin)
         .insert_resource(game_menus::StartMenu(args.open_menu.clone()))
         .insert_resource(scripts::StartUse(args.use_on.clone()))
+        .insert_resource(scripts::StartLoad(
+            args.load.as_ref().map(|p| p.to_string_lossy().to_string()),
+        ))
         .insert_resource(game_menus::FixedPointer(args.menu_pointer))
         .insert_resource(game_menus::FixedClicks {
             at: args.menu_clicks.clone(),
