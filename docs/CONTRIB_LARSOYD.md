@@ -67,11 +67,15 @@ maintainer. **Double-check every address and value before relying on it.**
   `None`), so `MonitorSelection::Primary` asks for fullscreen without naming an output, and KWin
   picks one itself. A later request that names an output does not move a window that is
   already fullscreen. WAYLAND_DEBUG showed `set_fullscreen(wl_output#7)` answered with the old
-  2560x1440 configure. The viewer now reads KDE's `kde_output_order_v1` at startup (the first
-  output is the desktop's primary), starts windowed, and makes its first fullscreen request name
+  2560x1440 configure. A window that starts windowed and then goes fullscreen also keeps the
+  virtual desktop of the monitor it was created on, which matters with per-monitor desktops. The
+  viewer now reads KDE's `kde_output_order_v1` (the first output is the desktop's primary) and
+  the outputs in the order they were announced, which is winit's monitor order. It then creates
+  the window fullscreen on `MonitorSelection::Index` of the primary, so the first request names
   that output (`viewer/src/primary_output.rs`). Without the protocol (other desktops, X11) it
-  behaves as before. *Tested* and *played*: KWin reported `output=DP-1 fullscreen=true
-  frame=0,0 3440x1440` while the user was active on another monitor.
+  behaves as before. *Tested* and *played*: the first request was `set_fullscreen(wl_output#7)`,
+  and KWin reported `output=DP-1 fullscreen=true desktops=1` while the user was on desktop 3 of
+  another monitor. No flash.
 
 ### Movie placement
 
