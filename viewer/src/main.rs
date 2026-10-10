@@ -101,6 +101,7 @@ use lighting::{
 };
 use lod::{LodLandMaterial, LodLandParams, LodPlugin};
 use terrain::{Terrain, TerrainMaterial, TerrainPlugin};
+use wgpu::rwh::RawWindowHandle;
 use world::frame::Stage;
 
 /// Starting exposure (EV100); lower is brighter. At this exposure lit
@@ -3229,38 +3230,61 @@ fn look_around(
 #[derive(Resource)]
 struct Background(bool);
 
+/// How the window can hold the pointer for mouse look.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PointerHold {
+    Locked,
+    Centered,
+}
+
+// centered still looks right since the look reads raw mouse motion
+fn cursor_state(grab: bool, hold: PointerHold) -> (CursorGrabMode, bool) {
+    match (grab, hold) {
+        (false, _) => (CursorGrabMode::None, true),
+        (true, PointerHold::Centered) => (CursorGrabMode::Confined, false),
+        (true, PointerHold::Locked) => (CursorGrabMode::Locked, false),
+    }
+}
+
+// win32 and x11 can only confine the pointer, x11 refuses a lock outright
+fn pointer_hold(handle: RawWindowHandle) -> PointerHold {
+    match handle {
+        RawWindowHandle::Win32(_) | RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_) => {
+            PointerHold::Centered
+        }
+        _ => PointerHold::Locked,
+    }
+}
+
 /// Walking outside menus the pointer is hidden and held in the window, as
 /// the game holds it for its mouse look; in menus, flying, with the
 /// window in the background or in a `--background` test run it's free.
+/// The game takes the mouse exclusively while its window is in front, 00a22660.
 fn grab_cursor(
     background: Res<Background>,
     player: Res<walk::Player>,
     menus: Option<Res<menus::Menus>>,
     conversation: Option<Res<dialogue::Conversation>>,
     vats: Option<Res<vats::Vats>>,
-    mut windows: Query<&mut Window, With<bevy::window::PrimaryWindow>>,
+    mut windows: Query<
+        (&mut Window, &bevy::window::RawHandleWrapper),
+        With<bevy::window::PrimaryWindow>,
+    >,
 ) {
-    let Ok(mut window) = windows.single_mut() else {
+    let Ok((mut window, handle)) = windows.single_mut() else {
         return;
     };
     let grab = !background.0
         && player.walking
         && window.focused
         && !mouse_in_menus(menus.as_deref(), conversation.as_deref(), vats.as_deref());
-    // Windows can't lock the pointer: there it's confined and put back in
-    // the middle each frame (the look reads the mouse's own motion).
-    let (mode, visible) = if !grab {
-        (CursorGrabMode::None, true)
-    } else if cfg!(target_os = "windows") {
-        (CursorGrabMode::Confined, false)
-    } else {
-        (CursorGrabMode::Locked, false)
-    };
+    let hold = pointer_hold(handle.get_window_handle());
+    let (mode, visible) = cursor_state(grab, hold);
     if window.cursor_options.grab_mode != mode || window.cursor_options.visible != visible {
         window.cursor_options.grab_mode = mode;
         window.cursor_options.visible = visible;
     }
-    if grab && cfg!(target_os = "windows") {
+    if grab && hold == PointerHold::Centered {
         let middle = Vec2::new(window.width(), window.height()) / 2.0;
         if window.cursor_position() != Some(middle) {
             window.set_cursor_position(Some(middle));
@@ -3359,6 +3383,48 @@ fn adjust_exposure(keys: Res<ButtonInput<KeyCode>>, mut cameras: Query<&mut Expo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointer_is_centered_where_the_window_system_cannot_lock_it() {
+        use std::num::{NonZeroIsize, NonZeroU32};
+        use std::ptr::NonNull;
+        use wgpu::rwh::{
+            AppKitWindowHandle, WaylandWindowHandle, Win32WindowHandle, XcbWindowHandle,
+            XlibWindowHandle,
+        };
+        let mut surface = 0u8;
+        let ptr = NonNull::from(&mut surface).cast();
+        let held = [
+            RawWindowHandle::Win32(Win32WindowHandle::new(NonZeroIsize::new(1).unwrap())),
+            RawWindowHandle::Xlib(XlibWindowHandle::new(1)),
+            RawWindowHandle::Xcb(XcbWindowHandle::new(NonZeroU32::new(1).unwrap())),
+            RawWindowHandle::Wayland(WaylandWindowHandle::new(ptr)),
+            RawWindowHandle::AppKit(AppKitWindowHandle::new(ptr)),
+        ]
+        .map(pointer_hold);
+        use PointerHold::*;
+        assert_eq!(held, [Centered, Centered, Centered, Locked, Locked]);
+    }
+
+    #[test]
+    fn walking_hides_and_holds_the_pointer_the_way_the_window_allows() {
+        use CursorGrabMode::*;
+        let states = [
+            cursor_state(true, PointerHold::Centered),
+            cursor_state(true, PointerHold::Locked),
+            cursor_state(false, PointerHold::Centered),
+            cursor_state(false, PointerHold::Locked),
+        ];
+        assert_eq!(
+            states,
+            [
+                (Confined, false),
+                (Locked, false),
+                (None, true),
+                (None, true)
+            ]
+        );
+    }
 
     /// The images Bevy is told no handle holds any more (the render world
     /// then drops their GPU copies).
