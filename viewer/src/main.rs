@@ -91,7 +91,7 @@ use bevy::render::render_resource::{
 };
 use bevy::render::renderer::RenderDevice;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot, ScreenshotCaptured};
-use bevy::window::{CursorGrabMode, WindowResolution};
+use bevy::window::{CursorGrabMode, MonitorSelection, WindowMode, WindowResolution};
 use cellview::{space, Blend, Game, GpuFormat, TextureData, ViewerScene};
 use exterior::{ExteriorStart, PendingExterior};
 use frame_order::{FrameSet, PlayerSet, ViewerSet};
@@ -212,7 +212,13 @@ fn main() {
         on: true,
     };
     let mut window = Window { title, ..default() };
+    // borderless at the monitor's own size where the game took exclusive fullscreen at iSize
+    match windowed_size(&game.settings) {
+        None => window.mode = WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+        Some(size) => window.resolution = WindowResolution::new(size.x as f32, size.y as f32),
+    }
     if args.screenshot.is_some() {
+        window.mode = WindowMode::Windowed;
         // The game's own resolution here, so pictures line up pixel for pixel.
         let (w, h) = args.screen_size.unwrap_or((1920, 1080));
         window.resolution =
@@ -226,6 +232,7 @@ fn main() {
         // the focus (and the mouse never held: `grab_cursor`), at
         // `--screen-size` when given.
         window.focused = false;
+        window.mode = WindowMode::Windowed;
         window.window_level = bevy::window::WindowLevel::AlwaysOnBottom;
         if let (None, Some((w, h))) = (&args.screenshot, args.screen_size) {
             window.resolution =
@@ -995,6 +1002,17 @@ fn anisotropy_setting(ini: &assets::IniSettings) -> u16 {
         .and_then(|v| v.trim().parse::<u16>().ok())
         .unwrap_or(8)
         .max(1)
+}
+
+/// The window's size from bFull Screen and iSize W and H, none when fullscreen.
+/// Defaults are fullscreen at 00f3fd00 and 640 by 480 at 00f3fc70 and 00f3fca0.
+fn windowed_size(ini: &assets::IniSettings) -> Option<UVec2> {
+    let int = |key, default| {
+        ini.get("Display", key)
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(default)
+    };
+    (int("bFull Screen", 1) == 0).then(|| UVec2::new(int("iSize W", 640), int("iSize H", 480)))
 }
 
 /// Starting pitch, radians, positive looking up; used once.
@@ -3419,6 +3437,28 @@ mod tests {
         .map(pointer_hold);
         use PointerHold::*;
         assert_eq!(held, [Centered, Centered, Centered, Locked, LockOnly]);
+    }
+
+    #[test]
+    fn the_window_follows_the_display_settings() {
+        let size = |text: &str| {
+            let mut ini = assets::IniSettings::default();
+            ini.add(text);
+            windowed_size(&ini)
+        };
+        assert_eq!(
+            size("[Display]\nbFull Screen=1\niSize W=2560\niSize H=1440"),
+            None
+        );
+        assert_eq!(
+            size("[Display]\nbFull Screen=0\niSize W=2560\niSize H=1440"),
+            Some(UVec2::new(2560, 1440))
+        );
+        assert_eq!(size(""), None);
+        assert_eq!(
+            size("[Display]\nbFull Screen=0"),
+            Some(UVec2::new(640, 480))
+        );
     }
 
     #[test]
