@@ -2,6 +2,7 @@
 
 My personal fork with changes to nv-rs that maintains strict upstream compatibility. The changes in this fork are done to make the software work better on my hardware, which is on a widescreen 4k monitor, Wayland, KDE Plasma and Linux. Any upstream fixes to my issues will be adopted instead. Read more in [docs/CONTRIB_LARSOYD.md](docs/CONTRIB_LARSOYD.md)
 
+---
 
 [![Rust](https://img.shields.io/badge/Rust-2021_edition-orange.svg)](https://www.rust-lang.org/)
 [![Engine](https://img.shields.io/badge/Engine-Bevy_0.16-blue.svg)](https://bevyengine.org/)
