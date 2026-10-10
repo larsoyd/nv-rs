@@ -125,6 +125,47 @@ pub fn placement(w: u32, h: u32, sw: f32, sh: f32, letterbox: bool) -> (f32, f32
     }
 }
 
+/// A movie sprite's part of the frame, placed again whenever the window's size changes.
+#[derive(Component)]
+pub struct MovieTile {
+    rect: (u32, u32, u32, u32),
+    movie: (u32, u32),
+    letterbox: bool,
+}
+
+pub fn fit_movie(
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut tiles: Query<(&MovieTile, &mut Sprite, &mut Transform)>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let (sw, sh, sf) = (
+        window.physical_width() as f32,
+        window.physical_height() as f32,
+        window.scale_factor(),
+    );
+    let mut placed = None;
+    for (tile, mut sprite, mut transform) in &mut tiles {
+        let (mw, mh) = tile.movie;
+        let (scale, x0, y0) = placement(mw, mh, sw, sh, tile.letterbox);
+        let (x, y, w, h) = tile.rect;
+        // half a pixel on, see the module notes
+        let px = x0 + x as f32 * scale + 0.5;
+        let py = y0 + y as f32 * scale + 0.5;
+        let size = Some(Vec2::new(w as f32 * scale, h as f32 * scale) / sf);
+        let at = Vec3::new((px - sw / 2.0) / sf, (sh / 2.0 - py) / sf, 0.0);
+        if sprite.custom_size != size || transform.translation != at {
+            sprite.custom_size = size;
+            transform.translation = at;
+            placed = Some((scale, x0, y0));
+        }
+    }
+    if let Some((scale, x0, y0)) = placed {
+        println!("Movie placed on {sw}x{sh}: scale {scale:.3}, corner {x0},{y0}.");
+    }
+}
+
 /// Smallest power of two (at least 4) that holds `n`, as `00ebfc80` rounds
 /// an edge tile.
 fn edge_tile(n: u32) -> u32 {
@@ -211,7 +252,6 @@ pub fn start_movies(
     mut images: ResMut<Assets<Image>>,
     mut sounds: ResMut<Assets<PcmSound>>,
     mut clock: ResMut<Time<Virtual>>,
-    windows: Query<&Window, With<PrimaryWindow>>,
     sinks: Query<(Entity, &AudioSink)>,
 ) {
     if movies.playing.is_some() {
@@ -353,32 +393,22 @@ pub fn start_movies(
             RenderLayers::layer(MOVIE_LAYER),
         ))
         .id();
-    let (sw, sh, sf) = windows.single().map_or((1920.0, 1080.0, 1.0), |w| {
-        (
-            w.physical_width() as f32,
-            w.physical_height() as f32,
-            w.scale_factor(),
-        )
-    });
-    let (scale, x0, y0) = placement(width, height, sw, sh, video.letterbox);
     let mut tiles = Vec::new();
     let mut sprites = Vec::new();
     for (x, y, w, h) in tile_layout(width, height) {
         let image = images.add(tile_image(w, h));
-        // Screen position of the tile's corner, half a pixel on (see the
-        // module notes), in the 2D camera's units (logical pixels, origin at
-        // the centre, y up).
-        let px = x0 + x as f32 * scale + 0.5;
-        let py = y0 + y as f32 * scale + 0.5;
         let sprite = commands
             .spawn((
                 Sprite {
                     image: image.clone(),
-                    custom_size: Some(Vec2::new(w as f32 * scale, h as f32 * scale) / sf),
                     anchor: Anchor::TopLeft,
                     ..default()
                 },
-                Transform::from_xyz((px - sw / 2.0) / sf, (sh / 2.0 - py) / sf, 0.0),
+                MovieTile {
+                    rect: (x, y, w, h),
+                    movie: (width, height),
+                    letterbox: video.letterbox,
+                },
                 RenderLayers::layer(MOVIE_LAYER),
             ))
             .id();
@@ -531,6 +561,47 @@ pub fn play_movies(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_movie_refits_when_the_window_goes_fullscreen() {
+        use bevy::window::WindowResolution;
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_systems(Update, fit_movie);
+        let size = |w: f32, h: f32| WindowResolution::new(w, h).with_scale_factor_override(1.0);
+        let window = Window {
+            resolution: size(1280.0, 720.0),
+            ..default()
+        };
+        let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+        let tile = MovieTile {
+            rect: (1024, 512, 256, 256),
+            movie: (1280, 720),
+            letterbox: true,
+        };
+        let sprite = app
+            .world_mut()
+            .spawn((tile, Sprite::default(), Transform::default()))
+            .id();
+        app.update();
+        let fitted = |app: &App| {
+            let s = app.world().get::<Sprite>(sprite).unwrap().custom_size;
+            (s, app.world().get::<Transform>(sprite).unwrap().translation)
+        };
+        assert_eq!(
+            fitted(&app),
+            (Some(Vec2::splat(256.0)), Vec3::new(384.5, -152.5, 0.0))
+        );
+        app.world_mut()
+            .get_mut::<Window>(window)
+            .unwrap()
+            .resolution = size(2560.0, 1440.0);
+        app.update();
+        assert_eq!(
+            fitted(&app),
+            (Some(Vec2::splat(512.0)), Vec3::new(768.5, -304.5, 0.0))
+        );
+    }
 
     #[test]
     fn the_intro_fills_a_wide_screen_and_is_letterboxed_on_a_tall_one() {

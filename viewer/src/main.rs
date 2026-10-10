@@ -670,7 +670,7 @@ fn main() {
             Update,
             (
                 (walk::doors, doors::update_doors).chain(),
-                (movie::start_movies, movie::play_movies).chain(),
+                (movie::start_movies, movie::fit_movie, movie::play_movies).chain(),
                 (
                     weather::run_weather,
                     follow_sky,
