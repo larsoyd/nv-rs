@@ -609,6 +609,24 @@ fn text_settings(order: &esm::LoadOrder) -> HashMap<String, String> {
 /// The cursor's picture, a game setting (`00f6ccc0`).
 const CURSOR_DEFAULT: &str = "Interface\\Icons\\Misc\\cursor.dds";
 
+const CURSOR_ATLAS: &str = "Interface\\InterfaceShared.tai";
+
+/// The cursor built at 0070b240, 32 by 32 at depth 2000 and hidden until a menu needs it.
+/// Its sCursorFilename picture comes from the sDefaultTexAtlas atlas set up at 00fb33f0.
+fn load_cursor(ui: &mut ui::Ui) -> Option<ui::TileId> {
+    let file = ui
+        .setting_text("sCursorFilename")
+        .unwrap_or_else(|| CURSOR_DEFAULT.to_string());
+    ui.load_menu(
+        format!(
+            "<image name=\"Cursor\"><depth>2000</depth><width>32</width><height>32</height><filename>{file}</filename><texatlas>{CURSOR_ATLAS}</texatlas><x>0</x><y>0</y><alpha>255</alpha><red>255</red><green>255</green><blue>255</blue></image>"
+        )
+        .as_bytes(),
+        &mut |_| None,
+    )
+    .ok()
+}
+
 impl Screen {
     fn build(game: &Game, size: UVec2) -> Screen {
         let mut read = |p: &str| game.assets.read(p).ok().flatten();
@@ -617,21 +635,7 @@ impl Screen {
         for w in &ui.warnings {
             println!("  Menus: {w}");
         }
-        // The cursor (`0070b240`): an image named "Cursor", depth 2000, 32 ×
-        // 32, its picture `sCursorFilename`, white, hidden until the
-        // menus need it.
-        let file = ui
-            .setting_text("sCursorFilename")
-            .unwrap_or_else(|| CURSOR_DEFAULT.to_string());
-        let cursor = ui
-            .load_menu(
-                format!(
-                    "<image name=\"Cursor\"><depth>2000</depth><width>32</width><height>32</height><filename>{file}</filename><x>0</x><y>0</y><alpha>255</alpha><red>255</red><green>255</green><blue>255</blue></image>"
-                )
-                .as_bytes(),
-                &mut |_| None,
-            )
-            .ok();
+        let cursor = load_cursor(&mut ui);
         // The fader (`00700960`): a quad over the whole screen with
         // `Data\Textures\Interface\Faders\Black.dds`, under the menus;
         // hidden until a sleep fades the screen.
@@ -1815,6 +1819,32 @@ mod tests {
     use super::*;
     use ui::fade::State;
     use ui::menus::message::MessageMenu;
+
+    #[test]
+    fn the_cursor_is_drawn_from_the_shared_interface_atlas() {
+        struct Shared;
+        impl Textures for Shared {
+            fn size(&mut self, path: &str) -> Option<(u32, u32)> {
+                match path {
+                    "textures\\interface\\interfaceshared0.dds" => Some((1024, 1024)),
+                    "textures\\interface\\icons\\misc\\cursor.dds" => Some((32, 32)),
+                    _ => None,
+                }
+            }
+            fn atlas(&mut self, path: &str) -> Option<ui::Atlas> {
+                (path == "textures\\interface\\interfaceshared.tai").then(|| {
+                    ui::Atlas::parse(
+                        "cursor.dds\t\tInterfaceShared0.dds, 0, 2D, 0.562988, 0.812988, 0.000000, 0.030273, 0.030273\n",
+                    )
+                })
+            }
+        }
+        let mut ui = bare().ui;
+        let cursor = load_cursor(&mut ui).unwrap();
+        let (texture, _, uv) = ui::draw::image_geometry(&mut ui, cursor, &mut Shared).unwrap();
+        assert_eq!(texture, "textures\\interface\\interfaceshared0.dds");
+        assert_eq!(uv[0], 0.562988);
+    }
 
     /// The menus with no game files: a 1920 × 1080 screen.
     fn bare() -> Screen {
