@@ -115,10 +115,13 @@ struct Playing {
 /// centred vertically. Otherwise the height fills it and the picture is
 /// centred horizontally. The screen offsets the game adds (its vtable
 /// +0x34, +0x38) are 0 for a full-screen device here.
+/// Wider screens than the movie get it fitted to the height instead of cropped, which the
+/// game only did on a three panel Eyefinity group by keeping movies on the middle panel, 004de100.
 pub fn placement(w: u32, h: u32, sw: f32, sh: f32, letterbox: bool) -> (f32, f32, f32) {
     if letterbox {
-        let scale = sw / w as f32;
-        (scale, 0.0, (sh - h as f32 * scale) / 2.0)
+        let scale = (sw / w as f32).min(sh / h as f32);
+        let (mw, mh) = (w as f32 * scale, h as f32 * scale);
+        (scale, (sw - mw) / 2.0, (sh - mh) / 2.0)
     } else {
         let scale = sh / h as f32;
         (scale, (sw - w as f32 * scale) / 2.0, 0.0)
@@ -609,6 +612,11 @@ mod tests {
         assert_eq!(placement(1280, 720, 1920.0, 1080.0, true), (1.5, 0.0, 0.0));
         // On 1920x1200 the width fills it; bars of 60 above and below.
         assert_eq!(placement(1280, 720, 1920.0, 1200.0, true), (1.5, 0.0, 60.0));
+        // Wider than the movie: the height fills it, bars at the sides, nothing cut off.
+        assert_eq!(
+            placement(1280, 720, 3440.0, 1440.0, true),
+            (2.0, 440.0, 0.0)
+        );
         // Not letterboxed: the height fills it, centred across.
         assert_eq!(
             placement(1280, 720, 1920.0, 1200.0, false),
