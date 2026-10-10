@@ -107,6 +107,7 @@ pub fn frustum_fov(default_fov: f32) -> f32 {
 
 /// The share of the screen's width left black on each side while scoped, from the aspect and
 /// fScopeScissorAmount, as 00870bd0 scissors the world with 00712e90's width over height over 4/3.
+// Translated from 00870bd0 and 00712e90 (decompiled, FalloutNV.exe 1.4.0.525)
 pub fn scissor_margin(aspect: f32, amount: f32) -> f32 {
     aspect / (4.0_f32 / 3.0) * amount * 0.5
 }

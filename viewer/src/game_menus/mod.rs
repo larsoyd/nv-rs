@@ -613,6 +613,7 @@ const CURSOR_ATLAS: &str = "Interface\\InterfaceShared.tai";
 
 /// The cursor built at 0070b240, 32 by 32 at depth 2000 and hidden until a menu needs it.
 /// Its sCursorFilename picture comes from the sDefaultTexAtlas atlas set up at 00fb33f0.
+// Translated from 0070b240 (decompiled, FalloutNV.exe 1.4.0.525)
 fn load_cursor(ui: &mut ui::Ui) -> Option<ui::TileId> {
     let file = ui
         .setting_text("sCursorFilename")

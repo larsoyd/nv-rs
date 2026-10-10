@@ -1745,7 +1745,8 @@ pub fn weapon_in_hand(order: &LoadOrder, state: &GameState, who: FormId) -> Opti
     if equipped.is_none() && state.npc_combat.unarmed.contains(&who) {
         return None;
     }
-    // the player draws fists with nothing equipped, only others pick one at 008a6840
+    // Translated from 008a6840 (decompiled, FalloutNV.exe 1.4.0.525)
+    // the player draws fists with nothing equipped, only others pick a weapon they carry
     // from what they carry now or, untouched, what their record gives them
     let id = equipped.or_else(|| {
         if who == PLAYER_REF {
