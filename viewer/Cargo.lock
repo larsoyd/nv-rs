@@ -3134,6 +3134,8 @@ dependencies = [
  "speedtree",
  "testdata",
  "ui",
+ "wayland-client",
+ "wayland-protocols-plasma",
  "wgpu",
  "world",
 ]

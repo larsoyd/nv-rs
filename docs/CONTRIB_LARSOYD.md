@@ -63,6 +63,16 @@ maintainer. **Double-check every address and value before relying on it.**
   there with settings is ambiguous, so neither is used. Upstream PR #62 covers the same ground for
   Proton, and its version should replace this one once it merges.
 
+- *Not Ghidra.* On Wayland, winit 0.30 has no primary monitor (`primary_monitor()` returns
+  `None`), so `MonitorSelection::Primary` asks for fullscreen without naming an output, and KWin
+  picks one itself. A later request that names an output does not move a window that is
+  already fullscreen. WAYLAND_DEBUG showed `set_fullscreen(wl_output#7)` answered with the old
+  2560x1440 configure. The viewer now reads KDE's `kde_output_order_v1` at startup (the first
+  output is the desktop's primary), starts windowed, and makes its first fullscreen request name
+  that output (`viewer/src/primary_output.rs`). Without the protocol (other desktops, X11) it
+  behaves as before. *Tested* and *played*: KWin reported `output=DP-1 fullscreen=true
+  frame=0,0 3440x1440` while the user was active on another monitor.
+
 ### Movie placement
 
 - *Traced.* `00ec0cd0` places a movie through `00ec2aa0` (scale), `00ec2b20` (x) and

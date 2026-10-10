@@ -31,6 +31,12 @@ speedtree = { path = "../crates/speedtree" }
 # whose own .ogg playback crashed the viewer in Dead Money's Villa).
 lewton = "0.10"
 
+# KDE's output order, to put fullscreen on the desktop's primary monitor
+# (winit has no primary monitor on Wayland). Already in the build through winit.
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = "0.31"
+wayland-protocols-plasma = { version = "0.3", features = ["client"] }
+
 [dev-dependencies]
 testdata = { path = "../crates/testdata" }
 

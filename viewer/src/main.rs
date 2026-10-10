@@ -54,6 +54,7 @@ mod player_body;
 mod player_camera;
 mod player_idle;
 mod present;
+mod primary_output;
 mod radio;
 mod rendered_terminal;
 mod report;
@@ -243,6 +244,20 @@ fn main() {
                 WindowResolution::new(w as f32, h as f32).with_scale_factor_override(1.0);
         }
     }
+    let output_order = primary_output::OutputOrder(
+        match window.mode {
+            WindowMode::BorderlessFullscreen(_) => primary_output::query(),
+            _ => Ok(Vec::new()),
+        }
+        .unwrap_or_else(|why| {
+            println!("[display] output order unknown ({why}); the compositor picks the screen");
+            Vec::new()
+        }),
+    );
+    if !output_order.0.is_empty() {
+        // kwin keeps a fullscreen window where it is, so the first request has to name the output
+        window.mode = WindowMode::Windowed;
+    }
     // Walking, except for screenshots, which keep the exact eye given.
     let player = walk::Player::new(args.screenshot.is_none() || args.walk);
     // A ready-made test character, set up before the first frame.
@@ -406,6 +421,8 @@ fn main() {
         .insert_resource(hud::ShowHud(args.hud))
         .insert_resource(ai::FrozenAi(args.freeze_ai))
         .insert_resource(Background(args.background))
+        .insert_resource(output_order)
+        .add_systems(Update, primary_output::fullscreen_on_primary)
         .insert_resource(background::UserWindow(if args.background {
             user_window
         } else {
