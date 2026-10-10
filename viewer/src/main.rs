@@ -3235,31 +3235,42 @@ struct Background(bool);
 enum PointerHold {
     Locked,
     Centered,
+    LockOnly,
+}
+
+/// What the mouse is for this frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MouseUse {
+    Look,
+    Menus,
+    Free,
 }
 
 // centered still looks right since the look reads raw mouse motion
-fn cursor_state(grab: bool, hold: PointerHold) -> (CursorGrabMode, bool) {
-    match (grab, hold) {
-        (false, _) => (CursorGrabMode::None, true),
-        (true, PointerHold::Centered) => (CursorGrabMode::Confined, false),
-        (true, PointerHold::Locked) => (CursorGrabMode::Locked, false),
+fn cursor_state(use_: MouseUse, hold: PointerHold) -> (CursorGrabMode, bool) {
+    match (use_, hold) {
+        (MouseUse::Free, _) => (CursorGrabMode::None, true),
+        (MouseUse::Menus, PointerHold::LockOnly) => (CursorGrabMode::None, false),
+        (MouseUse::Menus, _) => (CursorGrabMode::Confined, false),
+        (MouseUse::Look, PointerHold::Centered) => (CursorGrabMode::Confined, false),
+        (MouseUse::Look, _) => (CursorGrabMode::Locked, false),
     }
 }
 
 // win32 and x11 can only confine the pointer, x11 refuses a lock outright
+// macos locks but can't confine
 fn pointer_hold(handle: RawWindowHandle) -> PointerHold {
     match handle {
         RawWindowHandle::Win32(_) | RawWindowHandle::Xlib(_) | RawWindowHandle::Xcb(_) => {
             PointerHold::Centered
         }
+        RawWindowHandle::AppKit(_) | RawWindowHandle::UiKit(_) => PointerHold::LockOnly,
         _ => PointerHold::Locked,
     }
 }
 
-/// Walking outside menus the pointer is hidden and held in the window, as
-/// the game holds it for its mouse look; in menus, flying, with the
-/// window in the background or in a `--background` test run it's free.
-/// The game takes the mouse exclusively while its window is in front, 00a22660.
+/// The game takes the mouse exclusively while its window is in front, 00a22660,
+/// and hides the system pointer over it so only its own cursor shows, 0086a0a0.
 fn grab_cursor(
     background: Res<Background>,
     player: Res<walk::Player>,
@@ -3274,17 +3285,21 @@ fn grab_cursor(
     let Ok((mut window, handle)) = windows.single_mut() else {
         return;
     };
-    let grab = !background.0
-        && player.walking
-        && window.focused
-        && !mouse_in_menus(menus.as_deref(), conversation.as_deref(), vats.as_deref());
+    // flying, unfocused and background test runs leave the pointer alone
+    let use_ = if background.0 || !player.walking || !window.focused {
+        MouseUse::Free
+    } else if mouse_in_menus(menus.as_deref(), conversation.as_deref(), vats.as_deref()) {
+        MouseUse::Menus
+    } else {
+        MouseUse::Look
+    };
     let hold = pointer_hold(handle.get_window_handle());
-    let (mode, visible) = cursor_state(grab, hold);
+    let (mode, visible) = cursor_state(use_, hold);
     if window.cursor_options.grab_mode != mode || window.cursor_options.visible != visible {
         window.cursor_options.grab_mode = mode;
         window.cursor_options.visible = visible;
     }
-    if grab && hold == PointerHold::Centered {
+    if use_ == MouseUse::Look && hold == PointerHold::Centered {
         let middle = Vec2::new(window.width(), window.height()) / 2.0;
         if window.cursor_position() != Some(middle) {
             window.set_cursor_position(Some(middle));
@@ -3403,25 +3418,26 @@ mod tests {
         ]
         .map(pointer_hold);
         use PointerHold::*;
-        assert_eq!(held, [Centered, Centered, Centered, Locked, Locked]);
+        assert_eq!(held, [Centered, Centered, Centered, Locked, LockOnly]);
     }
 
     #[test]
-    fn walking_hides_and_holds_the_pointer_the_way_the_window_allows() {
+    fn the_game_keeps_the_system_pointer_hidden_and_in_the_window() {
         use CursorGrabMode::*;
-        let states = [
-            cursor_state(true, PointerHold::Centered),
-            cursor_state(true, PointerHold::Locked),
-            cursor_state(false, PointerHold::Centered),
-            cursor_state(false, PointerHold::Locked),
+        use MouseUse::*;
+        let uses = [Look, Menus, Free];
+        let holds = [
+            PointerHold::Locked,
+            PointerHold::Centered,
+            PointerHold::LockOnly,
         ];
+        let table = holds.map(|h| uses.map(|u| cursor_state(u, h)));
         assert_eq!(
-            states,
+            table,
             [
-                (Confined, false),
-                (Locked, false),
-                (None, true),
-                (None, true)
+                [(Locked, false), (Confined, false), (None, true)],
+                [(Confined, false), (Confined, false), (None, true)],
+                [(Locked, false), (None, false), (None, true)],
             ]
         );
     }
