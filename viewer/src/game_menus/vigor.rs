@@ -212,7 +212,11 @@ pub fn open(
     let mut sounds = Vec::new();
     opened.apply(requests, game, state, &mut sounds);
     screen.open.push(OpenMenu::Vigor(Box::new(opened)));
-    println!("Vit-o-matic: original models and LoveTesterMenu opened.");
+    let frustum = cellview::vigor::camera(&game.settings, screen.size.x, screen.size.y);
+    println!(
+        "[vigor] opened size={}x{} tan_half_width={:.3} tan_half_height={:.3}",
+        screen.size.x, screen.size.y, frustum.tan_half_width, frustum.tan_half_height
+    );
     sounds
 }
 
