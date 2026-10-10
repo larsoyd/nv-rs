@@ -462,6 +462,10 @@ fn main() {
             movie::withhold_input.after(bevy::input::InputSystem),
         )
         .add_systems(PostUpdate, viewmodel::copy_grade.after(grade::adapt_eyes))
+        .add_systems(
+            PostUpdate,
+            scope::refit_scope_camera.before(bevy::render::camera::CameraUpdateSystem),
+        )
         // The camera is the eye during the frame; the third-person view
         // moves it once everything has used it, and the eye comes back
         // first thing next frame (`player_camera`).

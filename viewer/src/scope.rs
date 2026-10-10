@@ -58,7 +58,12 @@ pub struct ScopeOverlay {
     root: Option<Entity>,
     sway: Option<Option<nif::camera::KeyedNode>>,
     last: Option<[f32; 3]>,
+    bars: Vec<Entity>,
+    bar_aspect: Option<f32>,
 }
+
+/// How far behind the overlay's model the scissor bars sit.
+const BAR_DEPTH: f32 = 4000.0;
 
 /// The overlay's camera onto the HUD's picture, before the HUD's pieces:
 /// on only while a scope is up (a 3D view costs a frame its work even
@@ -98,6 +103,39 @@ pub fn spawn_camera(commands: &mut Commands, layer: Handle<Image>) {
 pub fn frustum_fov(default_fov: f32) -> f32 {
     let a = (0.1 * default_fov * 0.017_453_3 * 1.1).min(1.539_38);
     2.0 * (0.75 * a.tan()).atan()
+}
+
+/// The share of the screen's width left black on each side while scoped, from the aspect and
+/// fScopeScissorAmount, as 00870bd0 scissors the world with 00712e90's width over height over 4/3.
+pub fn scissor_margin(aspect: f32, amount: f32) -> f32 {
+    aspect / (4.0_f32 / 3.0) * amount * 0.5
+}
+
+/// The two black bars outside the scissored band, as (centre x, half width, half height) at a
+/// depth in the overlay camera.
+pub fn scissor_bars(fov: f32, aspect: f32, margin: f32, depth: f32) -> [(f32, f32, f32); 2] {
+    let half_h = depth * (fov / 2.0).tan();
+    let half_w = half_h * aspect;
+    let inner = (1.0 - 2.0 * margin) * half_w;
+    let bar = (half_w - inner) / 2.0;
+    [(-(inner + bar), bar, half_h), (inner + bar, bar, half_h)]
+}
+
+/// Remeasures the overlay camera whenever the HUD's picture it draws into has another size,
+/// since a resize it never heard of would leave the overlay laid out for the old one.
+pub fn refit_scope_camera(
+    layer: Option<Res<crate::hud::HudLayer>>,
+    images: Res<Assets<Image>>,
+    mut cameras: Query<(&Camera, &mut Projection), With<ScopeCamera>>,
+) {
+    let Some(size) = layer.and_then(|l| images.get(&l.0)).map(|i| i.size()) else {
+        return;
+    };
+    for (camera, mut projection) in &mut cameras {
+        if camera.physical_target_size() != Some(size) {
+            projection.set_changed();
+        }
+    }
 }
 
 /// The scope node's transform in its camera's space (Bevy's axes: −z
@@ -241,6 +279,8 @@ pub fn update_scope(
     mut overlay: ResMut<ScopeOverlay>,
     (mut meshes, mut materials, mut images): OverlayAssets,
     mut visibility: Query<&mut Visibility>,
+    mut transforms: Query<&mut Transform>,
+    layer: Option<Res<crate::hud::HudLayer>>,
     (mut cameras, mut hud): ScopeCameras,
 ) {
     let order = &game.0.order;
@@ -328,6 +368,62 @@ pub fn update_scope(
             }
         }
     }
+    // the picture's own size, the camera's measure of it can lag a frame
+    let aspect = layer
+        .and_then(|l| images.get(&l.0))
+        .map(|i| i.size().as_vec2())
+        .map(|s| s.x / s.y);
+    if overlay.bars.is_empty() {
+        let mesh = meshes.add(Rectangle::new(2.0, 2.0));
+        let black = materials.add(StandardMaterial {
+            base_color: Color::BLACK,
+            unlit: true,
+            ..default()
+        });
+        overlay.bars = (0..2)
+            .map(|_| {
+                commands
+                    .spawn((
+                        Mesh3d(mesh.clone()),
+                        MeshMaterial3d(black.clone()),
+                        Transform::IDENTITY,
+                        Visibility::Hidden,
+                        RenderLayers::layer(SCOPE_LAYER),
+                    ))
+                    .id()
+            })
+            .collect();
+    }
+    let amount = game
+        .0
+        .settings
+        .float("Display", "fScopeScissorAmount")
+        .unwrap_or(0.3);
+    let bars = aspect.map(|a| scissor_bars(fov, a, scissor_margin(a, amount), BAR_DEPTH));
+    if on && overlay.bar_aspect != aspect {
+        println!("Scope bars: aspect {aspect:?}, scissor amount {amount}.");
+        overlay.bar_aspect = aspect;
+    }
+    for (i, &bar) in overlay.bars.iter().enumerate() {
+        if let (Some(rects), Ok(mut t)) = (bars, transforms.get_mut(bar)) {
+            let (x, half_w, half_h) = rects[i];
+            let want =
+                Transform::from_xyz(x, 0.0, -BAR_DEPTH).with_scale(Vec3::new(half_w, half_h, 1.0));
+            if *t != want {
+                *t = want;
+            }
+        }
+        if let Ok(mut v) = visibility.get_mut(bar) {
+            let want = if on {
+                Visibility::Visible
+            } else {
+                Visibility::Hidden
+            };
+            if *v != want {
+                *v = want;
+            }
+        }
+    }
 }
 
 /// The scope's sway on the view (before the mouse look writes the
@@ -386,6 +482,100 @@ pub fn scope_sway(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The overlay camera's projection's last change after the camera pass, and whether
+    /// anything changed it again before the next one.
+    #[derive(Resource, Default)]
+    struct Remeasured(Option<bevy::ecs::component::Tick>, bool);
+
+    fn probe(cameras: Query<Ref<Projection>, With<ScopeCamera>>, mut seen: ResMut<Remeasured>) {
+        let last = cameras.iter().map(|p| p.last_changed()).next();
+        seen.1 = seen.0.is_some() && last != seen.0;
+    }
+
+    fn after_pass(
+        cameras: Query<Ref<Projection>, With<ScopeCamera>>,
+        mut seen: ResMut<Remeasured>,
+    ) {
+        seen.0 = cameras.iter().map(|p| p.last_changed()).next();
+    }
+
+    #[test]
+    fn the_overlay_camera_is_remeasured_when_its_picture_changes_size() {
+        use bevy::asset::RenderAssetUsages;
+        use bevy::render::camera::{camera_system, CameraUpdateSystem, ManualTextureViews};
+        use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_resource::<ManualTextureViews>()
+            .init_resource::<Remeasured>()
+            .add_event::<bevy::window::WindowResized>()
+            .add_event::<bevy::window::WindowCreated>()
+            .add_event::<bevy::window::WindowScaleFactorChanged>()
+            .add_systems(
+                PostUpdate,
+                (
+                    (refit_scope_camera, probe)
+                        .chain()
+                        .before(CameraUpdateSystem),
+                    camera_system.in_set(CameraUpdateSystem),
+                    after_pass.after(CameraUpdateSystem),
+                ),
+            );
+        let size = |w, h| Extent3d {
+            width: w,
+            height: h,
+            depth_or_array_layers: 1,
+        };
+        let picture = Image::new_uninit(
+            size(1920, 1080),
+            TextureDimension::D2,
+            TextureFormat::Rgba16Float,
+            RenderAssetUsages::default(),
+        );
+        let layer = app.world_mut().resource_mut::<Assets<Image>>().add(picture);
+        app.insert_resource(crate::hud::HudLayer(layer.clone()));
+        let camera = Camera {
+            is_active: false,
+            target: RenderTarget::from(layer.clone()),
+            ..default()
+        };
+        app.world_mut().spawn((
+            Camera3d::default(),
+            camera,
+            Projection::default(),
+            ScopeCamera,
+        ));
+        app.update();
+        app.update();
+        assert!(
+            !app.world().resource::<Remeasured>().1,
+            "remeasured at the same size"
+        );
+        let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+        images.get_mut(&layer).unwrap().texture_descriptor.size = size(3440, 1440);
+        app.update();
+        assert!(
+            app.world().resource::<Remeasured>().1,
+            "not remeasured after the resize"
+        );
+    }
+
+    #[test]
+    fn the_world_is_scissored_to_a_band_inside_the_scope_frame() {
+        let wide = scissor_margin(3440.0 / 1440.0, 0.3);
+        assert!((wide - 0.26875).abs() < 1e-4, "{wide}");
+        assert!((scissor_margin(16.0 / 9.0, 0.3) - 0.2).abs() < 1e-4);
+        // The band stays inside the frame (46 at 380) on a 21:9 screen.
+        let fov = frustum_fov(75.0);
+        let [left, right] = scissor_bars(fov, 3440.0 / 1440.0, wide, 380.0);
+        let inner = right.0 - right.1;
+        assert!(inner < 46.0 && inner > 44.0, "{inner}");
+        assert_eq!(left.0, -right.0);
+        let half_w = 380.0 * (fov / 2.0).tan() * 3440.0 / 1440.0;
+        assert!((right.0 + right.1 - half_w).abs() < 1e-3);
+    }
 
     #[test]
     fn the_overlay_fills_the_screen_as_the_game_frames_it() {

@@ -1073,6 +1073,13 @@ fn update_hud(
                 image.texture_descriptor.size = wanted;
             }
         }
+        let picture = images.get(&layer.0).map(|i| i.texture_descriptor.size);
+        println!(
+            "HUD laid out for {}x{}, its picture {:?}.",
+            size.x,
+            size.y,
+            picture.map(|p| (p.width, p.height))
+        );
         messages.on = true;
     }
     let Some(b) = built.as_mut() else {
