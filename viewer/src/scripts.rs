@@ -118,17 +118,33 @@ pub struct ActivateRequest(pub Option<FormId>);
 #[derive(Resource, Default)]
 pub struct StartUse(pub Option<String>);
 
+impl StartUse {
+    /// The object once the player is placed and the start stage and lines
+    /// have run, so the object's conditions see them.
+    fn take_when_ready(
+        &mut self,
+        ready: bool,
+        stage: &StartStage,
+        lines: &StartCommands,
+    ) -> Option<String> {
+        let applied = stage.0.is_none() && lines.0.is_empty();
+        if ready && applied {
+            self.0.take()
+        } else {
+            None
+        }
+    }
+}
+
 /// Presses E on the `--use` object, as if the crosshair were on it.
 pub fn start_use(
     game: Res<GameFiles>,
     mut start: ResMut<StartUse>,
     player: Res<crate::walk::Player>,
     mut request: ResMut<ActivateRequest>,
+    (stage, lines): (Res<StartStage>, Res<StartCommands>),
 ) {
-    if !player.ready || start.0.is_none() {
-        return;
-    }
-    let Some(asked) = start.0.take() else {
+    let Some(asked) = start.take_when_ready(player.ready, &stage, &lines) else {
         return;
     };
     let order = &game.0.order;
@@ -1957,6 +1973,22 @@ mod tests {
 
     #[derive(Resource)]
     struct TestLoadResult(Result<bool, String>);
+
+    #[test]
+    fn the_start_use_waits_for_the_start_stage_and_lines() {
+        let mut start = StartUse(Some("Tester".into()));
+        let stage = || StartStage(Some(("VCG01".into(), 60)));
+        let line = || StartCommands(vec!["SetObjectiveDisplayed VCG01 30 1".into()]);
+        let (no_stage, no_lines) = (StartStage(None), StartCommands(Vec::new()));
+        assert_eq!(start.take_when_ready(true, &stage(), &no_lines), None);
+        assert_eq!(start.take_when_ready(true, &no_stage, &line()), None);
+        assert_eq!(start.take_when_ready(false, &no_stage, &no_lines), None);
+        assert_eq!(
+            start.take_when_ready(true, &no_stage, &no_lines).as_deref(),
+            Some("Tester")
+        );
+        assert_eq!(start.take_when_ready(true, &no_stage, &no_lines), None);
+    }
 
     #[test]
     fn the_start_save_waits_for_the_player_and_loads_once() {
