@@ -420,9 +420,12 @@ pub fn camera(
     // Reading the latter as a single float would incorrectly yield -2.
     let radians = f64::from(fov) * f64::from(1.0f32.to_radians()) * f64::from(0.65f32);
     let tangent = (radians as f32).tan();
+    let aspect = width as f32 / height.max(1) as f32;
+    // past 16:9 the original keeps the width and the page buttons drop off the bottom
+    let tan_half_height = tangent * 0.75 / aspect.min(16.0 / 9.0);
     crate::lockpick::MenuCamera {
-        tan_half_width: tangent * 0.75,
-        tan_half_height: tangent * (height as f32 / width.max(1) as f32) * 0.75,
+        tan_half_width: tan_half_height * aspect,
+        tan_half_height,
         near,
     }
 }
@@ -563,6 +566,26 @@ mod tests {
         assert_eq!(wide.near, 5.0);
         let square = camera(&ini, 640, 640);
         assert_eq!(square.tan_half_width, square.tan_half_height);
+    }
+
+    #[test]
+    fn screens_wider_than_16_9_keep_the_16_9_height() {
+        let ini = assets::IniSettings::default();
+        let wide = camera(&ini, 1920, 1080);
+        for (width, height) in [(2560, 1080), (3440, 1440), (5760, 1080)] {
+            let ultra = camera(&ini, width, height);
+            assert!(
+                (ultra.tan_half_height - wide.tan_half_height).abs() < 1e-6,
+                "{width}x{height}: tan_half_height {} want {}",
+                ultra.tan_half_height,
+                wide.tan_half_height
+            );
+            let aspect = ultra.tan_half_width / ultra.tan_half_height;
+            assert!(
+                (aspect - width as f32 / height as f32).abs() < 1e-5,
+                "{width}x{height}: frustum aspect {aspect}"
+            );
+        }
     }
 
     #[test]

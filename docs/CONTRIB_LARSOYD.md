@@ -110,6 +110,24 @@ maintainer. **Double-check every address and value before relying on it.**
   (`viewer/src/scope.rs`: `scissor_margin`, `scissor_bars`, `refit_scope_camera`). *Tested* and
   *played*.
 
+### The Vit-o-matic camera on wide screens
+
+- *Traced.* `007945f0` builds the menu frustum as left/right `∓tan(fDefaultFOV × π/180 × 0.65) ×
+  0.75` (doubles `01023128` and `01074b98`, float `01016264`), and top/bottom as the same times
+  height ÷ width. `004dc1f0` returns the width (`0118947c`) and `004dc200` the height (`01189480`).
+  `004da670` passes them to `CreateWindowExA` in that order. The width stays fixed and the height
+  shrinks on wider screens.
+  - The flag `011f9426` swaps in the requested height only on the letterbox fallback. That
+    fallback is when fullscreen can't get the exact mode (`004dc710` sets `011c70ec`).
+- *Data.* From the real `NV_VitoMaticVigorTester_Activate.NIF` at the Forward pose, the page
+  buttons P1_LT and P1_RT reach down to tan −0.420 and P1_Decrease to −0.398. The frustum's
+  vertical half-tangent is 0.481 at 16:9 but 0.358 at 3440×1440, so at 21:9 the original's
+  camera leaves those buttons below the screen. The user saw this in play.
+- The viewer keeps the 16:9 height on screens wider than 16:9 and widens the view instead. This is
+  a deliberate improvement. At 16:9 and narrower nothing changes (`cellview::vigor::camera`, test
+  `screens_wider_than_16_9_keep_the_16_9_height`). Lockpicking (`0078e900`) and the rendered
+  terminal build the same width-fixed frustum and are unchanged.
+
 ## Open
 
 - `00709d50` sets the overlay frustum only on the Eyefinity path (guarded by the flag at
