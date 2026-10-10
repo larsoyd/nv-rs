@@ -3,7 +3,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use assets::{archive_list_from, read_archive_list, ArchiveReason, Assets, Source};
+use assets::{
+    archive_list_from, default_ini_candidates, default_settings_files, read_archive_list,
+    ArchiveReason, Assets, Source,
+};
 
 /// Files grouped by folder: (folder, [(file name, contents)]).
 type Folders<'a> = Vec<(String, Vec<(String, &'a [u8])>)>;
@@ -359,4 +362,49 @@ fn loads_the_patch_archive_after_the_list() {
     );
     assert_eq!(assets.archives()[2].reason, ArchiveReason::Patch);
     assert!(assets.contains("meshes\\nv\\tower.nif"));
+}
+
+const WINE_GAME: &str = "drive_c/GOG Games/Fallout New Vegas";
+const WINE_DOCS: &str = "drive_c/users/steamuser/Documents/My Games/FalloutNV";
+
+#[test]
+fn settings_come_from_the_wine_prefix_the_data_folder_is_in() {
+    let prefix = TempData::new("wine-ini");
+    prefix.write(
+        &format!("{WINE_DOCS}/Fallout.ini"),
+        b"[Display]\nbFull Screen=1\n",
+    );
+    prefix.write(
+        &format!("{WINE_DOCS}/FalloutPrefs.ini"),
+        b"[Display]\niSize W=2560\n",
+    );
+    let data = prefix.path().join(WINE_GAME).join("Data");
+    let docs = prefix.path().join(WINE_DOCS);
+    assert_eq!(
+        default_settings_files(&data),
+        [
+            prefix.path().join(WINE_GAME).join("Fallout_default.ini"),
+            docs.join("Fallout.ini"),
+            docs.join("FalloutPrefs.ini"),
+        ]
+    );
+    assert_eq!(default_ini_candidates(&data)[0], docs.join("Fallout.ini"));
+}
+
+#[test]
+fn two_wine_users_with_settings_pick_neither() {
+    let prefix = TempData::new("wine-ini-two");
+    prefix.write(&format!("{WINE_DOCS}/Fallout.ini"), b"");
+    prefix.write(
+        "drive_c/users/lars/Documents/My Games/FalloutNV/Fallout.ini",
+        b"",
+    );
+    let data = prefix.path().join(WINE_GAME).join("Data");
+    let found = default_settings_files(&data);
+    assert!(
+        found
+            .iter()
+            .all(|f| !f.starts_with(prefix.path().join("drive_c/users"))),
+        "an ambiguous prefix gave {found:?}"
+    );
 }

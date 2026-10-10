@@ -216,26 +216,50 @@ impl IniSettings {
 /// install's `Fallout_default.ini`, then the user's `Fallout.ini` and
 /// `FalloutPrefs.ini` under `Documents\My Games\FalloutNV` (or OneDrive's
 /// Documents).
+/// Under Wine the Documents of the prefix holding the install come first.
 pub fn default_settings_files(data_dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     if let Some(game_dir) = data_dir.parent() {
         files.push(game_dir.join("Fallout_default.ini"));
     }
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        let home = PathBuf::from(home);
-        for documents in [
-            home.join("Documents"),
-            home.join("OneDrive").join("Documents"),
-        ] {
-            let dir = documents.join("My Games").join("FalloutNV");
-            if dir.join("Fallout.ini").exists() {
-                files.push(dir.join("Fallout.ini"));
-                files.push(dir.join("FalloutPrefs.ini"));
-                break;
-            }
+    for documents in documents_dirs(data_dir) {
+        let dir = documents.join("My Games").join("FalloutNV");
+        if dir.join("Fallout.ini").exists() {
+            files.push(dir.join("Fallout.ini"));
+            files.push(dir.join("FalloutPrefs.ini"));
+            break;
         }
     }
     files
+}
+
+/// The Documents folders that may hold the game's settings, the Wine prefix's first.
+fn documents_dirs(data_dir: &Path) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = wine_documents(data_dir).into_iter().collect();
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        let home = PathBuf::from(home);
+        dirs.push(home.join("Documents"));
+        dirs.push(home.join("OneDrive").join("Documents"));
+    }
+    dirs
+}
+
+// two prefix users with settings is ambiguous so neither is used
+fn wine_documents(data_dir: &Path) -> Option<PathBuf> {
+    let drive_c = data_dir
+        .ancestors()
+        .find(|a| a.file_name() == Some("drive_c".as_ref()))?;
+    let mut found = std::fs::read_dir(drive_c.join("users"))
+        .ok()?
+        .filter_map(|e| Some(e.ok()?.path().join("Documents")))
+        .filter(|d| {
+            d.join("My Games")
+                .join("FalloutNV")
+                .join("Fallout.ini")
+                .exists()
+        });
+    let one = found.next()?;
+    found.next().is_none().then_some(one)
 }
 
 /// Uses the first candidate ini file that has an archive list, or the
@@ -260,21 +284,10 @@ pub fn archive_list_from(candidates: &[PathBuf]) -> ArchiveList {
 /// often holds Documents), then `Fallout_default.ini` in the install folder
 /// that contains `Data`.
 pub fn default_ini_candidates(data_dir: &Path) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        let home = PathBuf::from(home);
-        for documents in [
-            home.join("Documents"),
-            home.join("OneDrive").join("Documents"),
-        ] {
-            candidates.push(
-                documents
-                    .join("My Games")
-                    .join("FalloutNV")
-                    .join("Fallout.ini"),
-            );
-        }
-    }
+    let mut candidates: Vec<PathBuf> = documents_dirs(data_dir)
+        .into_iter()
+        .map(|d| d.join("My Games").join("FalloutNV").join("Fallout.ini"))
+        .collect();
     if let Some(game_dir) = data_dir.parent() {
         candidates.push(game_dir.join("Fallout_default.ini"));
     }
